@@ -1,5 +1,5 @@
 # Data Analyse Coronabrandhaarden
-Analyse n.a.v. [artikel](https://nos.nl/artikel/2361814-negen-van-tien-grootste-coronabrandhaarden-zijn-christelijke-gemeente.html) op de website van de [NOS](https://nos.nl).  
+Analyse op basis van open data n.a.v. [artikel](https://nos.nl/artikel/2361814-negen-van-tien-grootste-coronabrandhaarden-zijn-christelijke-gemeente.html) op de website van de [NOS](https://nos.nl).  
 
 Zie notebook voor details.
 
