@@ -1,0 +1,257 @@
+---
+title: "Data Analyse Coronabrandhaarden"
+author: "Brinkhuis"
+output:
+  pdf_document:
+    toc: yes
+  html_notebook:
+    toc: yes
+  html_document:
+    toc: yes
+    df_print: paged
+---
+
+# Inleiding
+
+Dit notebook bevat een korte analyse naar aanleiding van het artikel dat de [NOS](https://nos.nl/) op 23 december 2020 publiceerde met de titel "[Negen van tien grootste coronabrandhaarden zijn christelijke gemeente](https://nos.nl/artikel/2361814-negen-van-tien-grootste-coronabrandhaarden-zijn-christelijke-gemeente.html)".
+
+Voor de analyse wordt gebruik gemaakt van open data van het [CBS](https://www.cbs.nl), het [RIVM](https://www.rivm.nl) en de [Kiesraad](https://www.kiesraad.nl).
+
+Als peildatum wordt de publicatiedatum van het artikel gehanteerd.
+
+# Packages
+
+```{r load_packages, include=TRUE}
+library(sf)
+library(tmap)
+library(dplyr)
+```
+
+# Settings
+
+```{r plot_mode, include=FALSE}
+tmap_mode("plot") # use tmap_mode "view" for an interactive plot
+```
+
+Gebruik de gegevens van 23 december 2020 voor de analyse.
+
+```{r date_of_publication, include=TRUE}
+date_of_publication = "2020-12-23"
+```
+
+# Data
+
+Aanmaken van folders voor het separaat opslaan van bestanden.
+
+```{r create_directories, include=TRUE}
+directories <- list("downloads", "shapefiles", "data", "output")
+
+for (directory in directories) {
+  if (!dir.exists(file.path(directory))) {
+    dir.create(file.path(directory))
+  }
+}
+```
+
+## Shapefiles
+
+Om een _thematic map_ te kunnen genereren, wordt een shapefile gebruikt met polygonen van gemeentegrenzen. Dit bestand is als ZIP-file beschikbaar op de website van het [CBS](https://www.cbs.nl). Het bestand bevat zowel polygonen voor _land_ als voor _water_. Voor de analyse worden enkel de polygonen voor _land_ gebruikt (filter op `H2O == "NEE"`).
+
+Het bestand met de gemeentegrenzen bevat ook andere gegevens, onder andere over het aantal inwoners en het aantal huishoudens per gemeente. Op basis van deze gegevens wordt de (gemiddelde) grootte van een huishouden in een gemeente berekend en als variable `GROOTTE_HH` toegevoegd aan de dataset.
+
+```{r shapefiles, include=TRUE}
+# download shapefiles
+url = "https://www.cbs.nl/-/media/cbs/dossiers/nederland-regionaal/wijk-en-buurtstatistieken/wijkbuurtkaart_2020_v1.zip"
+filename_zip <- sapply(strsplit(url, "/"), tail, 1)
+filepath_zip <- file.path("downloads", filename_zip)
+if (!file.exists(filepath_zip)){
+  download.file(url, filepath_zip)
+}
+
+# extract shapefiles
+filename_shp <- "gemeente_2020_v1.dbf"
+filepath_shp <- file.path("shapefiles", filename_shp)
+if (!file.exists(filepath_shp)){
+  unzip(filepath_zip, exdir=file.path("shapefiles"))
+}
+
+# read shapefile
+municipality <- st_read(filepath_shp) %>%
+  filter(H2O == "NEE") %>%
+  mutate(GROOTTE_HH = AANT_INW / AANTAL_HH) %>%
+  select(GM_CODE, GM_NAAM, BEV_DICHTH, AANT_INW, AANTAL_HH, GROOTTE_HH, geometry)
+```
+
+## COVID-19
+
+De COVID-19 data is beschikbaar via de website van het [RIVM](https://www.rivm.nl). Betreft het aantal (nieuwe) COVID-19 besmettingen per gemeente per dag. Alleen de data van 23 december 2020 zal worden gebruikt in deze analyse.
+
+Omdat de aantallen voor de gemeente Amsterdam zijn onderverdeeld naar 2 ROAZ-regio's, is het nodig om de aantallen te aggregeren per gemeente.
+
+```{r covid_data, include=TRUE}
+# download covid data
+url <- "https://data.rivm.nl/covid-19/COVID-19_aantallen_gemeente_per_dag.csv"
+filename_covid <- sapply(strsplit(url, "/"), tail, 1)
+filepath_covid <- file.path("data", filename_covid)
+download.file(url, filepath_covid)
+
+# read covid data
+covid <- read.csv2(filepath_covid) %>%
+  filter(Date_of_publication==date_of_publication,
+         Municipality_code!="" # deselect missing municipalities
+        ) %>%
+  select(Municipality_code, Total_reported) %>%
+  group_by(Municipality_code) %>%
+  summarise(Total_reported = sum(Total_reported)) # summarize data for municipalities having multiple data points
+```
+
+## Verkiezingsuitslagen
+
+De verkiezingsuitlslagen van de gemeenteraadsverkiezingen 2018 zijn beschikbaar via de website van de [Kiesraad](https://www.kiesraad.nl).
+
+```{r election_data, include=TRUE}
+# download verkiezingsuitslagen 2018.03.21
+url <- "https://www.verkiezingsuitslagen.nl/data/CsvZetels/10895"
+filename_elec_20180321 <- "Zetelverdeling_alle_gemeenten_GR20180321.csv"
+filepath_elec_20180321 <- file.path("data", filename_elec_20180321)
+if (!file.exists(filepath_elec_20180321)){
+  download.file(url, filepath_elec_20180321)
+}
+
+# download verkiezingsuitslagen 2018.11.21
+url <- "https://www.verkiezingsuitslagen.nl/data/CsvZetels/10901"
+filename_elec_20181121 <- "Zetelverdeling_alle_gemeenten_GR20181121.csv"
+filepath_elec_20181121 <- file.path("data", filename_elec_20181121)
+if (!file.exists(filepath_elec_20181121)){
+  download.file(url, filepath_elec_20181121)
+}
+
+# read verkiezingsuitslagen: aantal zetels
+elec_chairs <- rbind(read.csv2(filepath_elec_20180321), read.csv2(filepath_elec_20181121)) %>%
+  select(RegioNaam, AantalZetels) %>%
+  group_by(RegioNaam) %>%
+  summarise(AantalZetels = sum(AantalZetels, na.rm=TRUE))
+
+# read verkiezingsuitslagen: aantal zetels per gemeente
+elec_chr <- rbind(read.csv2(filepath_elec_20180321),
+                  read.csv2(filepath_elec_20181121)
+                  ) %>%
+  filter(Partij == "ChristenUnie" |
+         Partij == "ChristenUnie - SGP" |
+         Partij == "ChristenUnie-SGP" |
+         Partij == "ChristenUnie/SGP" |
+         Partij == "SGP-ChristenUnie" |
+         Partij == "Staatkundig Gereformeerde Partij (SGP)"
+         ) %>%
+  select(RegioNaam, AantalZetels) %>%
+  group_by(RegioNaam) %>%
+  summarise(AantalZetelsChr = sum(AantalZetels, na.rm=TRUE))
+
+# merge verkiezingsuitslagen
+elec <- merge(elec_chairs, elec_chr, by="RegioNaam") %>%
+  mutate(Aandeel_SGP_CU = AantalZetelsChr / AantalZetels)
+```
+
+## Samenvoegen
+
+De gemeentegrenzen en de COVID-19 data worden samengevoegd. Daarbij wordt het aantal (nieuwe) COVID-19 besmettingen per 100.000 inwoners berekend en opgeslagen als variable `Total_reported_100K`.
+
+```{r merge_shapes_and_covid_data, include=TRUE}
+munic_covid <- merge(municipality, covid, by.x="GM_CODE", by.y="Municipality_code") %>%
+  mutate(Total_reported_100K = Total_reported / AANT_INW * 100000) %>%
+  select(GM_CODE, GM_NAAM, GROOTTE_HH, Total_reported_100K, geometry)
+```
+
+Aan bovenstaande data worden de uitslagen van de verkiezingen toegevoegd voor de finale dataset ten behoeve van de analyse.
+
+```{r merge_shapes_covid_and_election_data, include=TRUE}
+df <- merge(munic_covid, elec, by.x="GM_NAAM", by.y="RegioNaam", all.x=TRUE)
+```
+
+# Analyse
+
+## Besmettingen per 100.000 vs Aandeel SGP & ChristenUnie
+
+Onderstaand een vergelijking van het aantal (nieuwe) COVID-19 besmetting per 100.000 inwoners (`Total_reported_100K`) ten opzichte van het aandeel in zetels van de partijen SGP en ChristenUnie (`Aandeel_SGP_CU`). Niet voor elke gemeente is data bekend over het aantal zetels voor SGP en ChristenUnie, mogelijk omdat zij in betreffende gemeenten die deelnemen.
+
+```{r figuur_1, include=TRUE}
+# visualize data
+figuur_1 <- tm_shape(df) +
+  tm_polygons(c("Total_reported_100K", "Aandeel_SGP_CU")) +
+  tm_facets(sync = TRUE, ncol = 2)
+
+# save figure
+tmap_save(figuur_1, filename = file.path("output", "figuur_1.png"))
+
+# show figure
+figuur_1
+```
+
+Correlatie tussen het aantal gevallen per 100.000 inwoners en het aandeel SGP/ChristenUnie voor de gemeenten waarvoor verkiezingsuitslagen bekend zijn.
+
+```{r correlatie_1a, include=TRUE}
+cor(df$Total_reported_100K, df$Aandeel_SGP_CU, use = "complete.obs")
+```
+
+Correlatie tussen het aantal gevallen per 100.000 inwoners en het aandeel SGP/ChristenUnie voor de gemeenten waarvoor verkiezingsuitslagen bekend zijn daar waar dat aandeel groter of gelijk is aan 20%.
+
+```{r correlatie_1b, include=TRUE}
+df20 <- df %>%
+  filter(Aandeel_SGP_CU >= 0.20)
+
+cor(df20$Total_reported_100K, df20$GROOTTE_HH, use = "complete.obs")
+```
+
+Top 10 van gemeenten met de hoogste besmettingscijfers per 100.000 inwoners.
+
+```{r top_10_a, include=TRUE}
+df10 = df %>%
+  select(GM_NAAM, Total_reported_100K, Aandeel_SGP_CU) %>%
+  arrange(desc(Total_reported_100K))
+
+head(df10, 10)
+```
+
+Top 10 van gemeentes met de hoogste besmettingscijfers per 100.000 inwoners, gefilterd op gemeenten waarbij SGP en ChristenUnie 20% of meer van de zetels hebben. Daarvan blijker er 4 in de Top 10 voor te komen.
+
+```{r top_10_b, include=TRUE}
+df10 = df %>%
+  select(GM_NAAM, Total_reported_100K, Aandeel_SGP_CU) %>%
+  arrange(desc(Total_reported_100K))
+
+head(df10, 10) %>%
+  filter(Aandeel_SGP_CU >= 0.20)
+```
+
+## Besmettingen per 100.000 vs Grootte huishouden
+
+Onderstaand een vergelijking van het aantal (nieuwe) COVID-19 besmetting per 100.000 inwoners (`Total_reported_100K`) ten opzichte van het aandeel de (gemiddelde) grootte van huishoudens in een gemeente (`GROOTTE_HH`).
+
+```{r figure_2a, include=TRUE}
+# visualize data
+figure_2 <- tm_shape(df) +
+  tm_polygons(c("Total_reported_100K", "GROOTTE_HH")) +
+  tm_facets(sync = TRUE, ncol = 2)
+
+# save figure
+tmap_save(figure_2, filename = file.path("output", "figure_2.png"))
+
+# show figure
+figure_2
+```
+
+Correlatie tussen het aantal gevallen per 100.000 inwoners en de grootte van huishoudens.
+
+```{r correlatie_2, include=TRUE}
+cor(df$Total_reported_100K, df$GROOTTE_HH, use = "complete.obs")
+```
+
+Correlatie tussen het aantal gevallen per 100.000 inwoners en de grootte van huishoudens daar waar de huishoudens groter zijn dan gemiddeld.
+
+```{r correlatie_2b, include=TRUE}
+dfm <- df %>%
+  filter(GROOTTE_HH >= mean(df$GROOTTE_HH))
+
+cor(dfm$Total_reported_100K, dfm$GROOTTE_HH, use = "complete.obs")
+```
+

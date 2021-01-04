@@ -37,3 +37,9 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# Project specific
+data
+downloads
+shapefiles
+*.html
