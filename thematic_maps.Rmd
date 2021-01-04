@@ -2,13 +2,13 @@
 title: "Data Analyse Coronabrandhaarden"
 author: "Brinkhuis"
 output:
-  pdf_document:
-    toc: yes
   html_notebook:
     toc: yes
   html_document:
     toc: yes
     df_print: paged
+  pdf_document:
+    toc: yes
 ---
 
 # Inleiding
@@ -227,22 +227,22 @@ head(df10, 10) %>%
 
 Onderstaand een vergelijking van het aantal (nieuwe) COVID-19 besmetting per 100.000 inwoners (`Total_reported_100K`) ten opzichte van het aandeel de (gemiddelde) grootte van huishoudens in een gemeente (`GROOTTE_HH`).
 
-```{r figure_2a, include=TRUE}
+```{r figuur_2, include=TRUE}
 # visualize data
-figure_2 <- tm_shape(df) +
+figuur_2 <- tm_shape(df) +
   tm_polygons(c("Total_reported_100K", "GROOTTE_HH")) +
   tm_facets(sync = TRUE, ncol = 2)
 
 # save figure
-tmap_save(figure_2, filename = file.path("output", "figure_2.png"))
+tmap_save(figuur_2, filename = file.path("output", "figuur_2.png"))
 
 # show figure
-figure_2
+figuur_2
 ```
 
 Correlatie tussen het aantal gevallen per 100.000 inwoners en de grootte van huishoudens.
 
-```{r correlatie_2, include=TRUE}
+```{r correlatie_2a, include=TRUE}
 cor(df$Total_reported_100K, df$GROOTTE_HH, use = "complete.obs")
 ```
 
